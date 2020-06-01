@@ -5,6 +5,12 @@ steps:
     TargetFolder: src/electron
 
 - bash: |
+    whoami
+    su builduser
+    whoami
+  displayName: 'Make sure we are running as builduser'
+
+- bash: |
     cd src/electron
     node script/yarn.js install --frozen-lockfile
   displayName: 'Yarn install'
