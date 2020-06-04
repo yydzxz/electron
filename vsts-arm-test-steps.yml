@@ -5,12 +5,6 @@ steps:
     TargetFolder: src/electron
 
 - bash: |
-    whoami
-    su builduser
-    whoami
-  displayName: 'Make sure we are running as builduser'
-
-- bash: |
     cd src/electron
     node script/yarn.js install --frozen-lockfile
   displayName: 'Yarn install'
@@ -79,9 +73,6 @@ steps:
     sudo gdk-pixbuf-query-loaders --update-cache
     cd src
     export ELECTRON_OUT_DIR=Default
-    unset ELECTRON_DISABLE_SANDBOX
-    sudo chown root out/Default/chrome-sandbox
-    sudo chmod 4755 out/Default/chrome-sandbox
     (cd electron && node script/yarn test -- --enable-logging)
   displayName: 'Run Electron tests'
   timeoutInMinutes: 20
