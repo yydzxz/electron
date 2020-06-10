@@ -17,6 +17,10 @@ parameters:
     type: boolean
     default: true
 
+  run-build-win:
+    type: boolean
+    default: true
+
   run-linux-x64-publish:
     type: boolean
     default: false
@@ -61,7 +65,7 @@ parameters:
 # Build machines configs.
 docker-image: &docker-image
   docker:
-    - image: electronjs/build:d09fd95029bd8c1c73069888231b29688ef385ed
+    - image: electronjs/build:d93c7015f1885a57f54c97827a6861641682ff66
 
 machine-linux-medium: &machine-linux-medium
   <<: *docker-image
@@ -181,6 +185,12 @@ env-macos-build: &env-macos-build
   # Disable pre-compiled headers to reduce out size, only useful for rebuilds
   GN_BUILDFLAG_ARGS: 'enable_precompiled_headers = false'
 
+env-win-build: &env-win-build
+  # Set cross-compile target
+  GCLIENT_TARGET_OS: 'target_os=["win"]'
+  GN_BUILDFLAG_ARGS: 'target_os = "win"'
+  STRIP_BINARIES: false
+
 # Individual (shared) steps.
 step-maybe-notify-slack-failure: &step-maybe-notify-slack-failure
   run:
@@ -231,7 +241,18 @@ step-gclient-sync: &step-gclient-sync
           $GCLIENT_EXTRA_ARGS \
           "$CIRCLE_REPOSITORY_URL"
 
-        ELECTRON_USE_THREE_WAY_MERGE_FOR_PATCHES=1 gclient sync --with_branch_heads --with_tags
+        if [ ! -z "$GCLIENT_TARGET_OS" ]; then
+          echo $GCLIENT_TARGET_OS >> .gclient
+          curl -LO https://github.com/deepak1556/win-sdk/releases/download/v10.0.18362/c151290a4ed475dfdc4e8c784f2f4373f8630fc9.zip
+          export DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL="$PWD"
+          export GYP_MSVS_HASH_9ff60e43ba91947baca460d0ca3b1b980c3a2c23=c151290a4ed475dfdc4e8c784f2f4373f8630fc9
+          cat .gclient
+          unset DEPOT_TOOLS_WIN_TOOLCHAIN
+        fi
+
+        ELECTRON_USE_THREE_WAY_MERGE_FOR_PATCHES=1 gclient sync -f --with_branch_heads --with_tags
+        # Debug purpose
+        echo $DEPOT_TOOLS_WIN_TOOLCHAIN
         # Re-export all the patches to check if there were changes.
         python src/electron/script/export_all_patches.py src/electron/patches/config.json
         cd src/electron
@@ -258,6 +279,8 @@ step-setup-env-for-build: &step-setup-env-for-build
     command: |
       # To find `gn` executable.
       echo 'export CHROMIUM_BUILDTOOLS_PATH="'"$PWD"'/src/buildtools"' >> $BASH_ENV
+      echo 'export DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL="$PWD"' >> $BASH_ENV
+      echo 'unset DEPOT_TOOLS_WIN_TOOLCHAIN' >> $BASH_ENV
 
       if [ "$USE_SCCACHE" == "true" ]; then
         # https://github.com/mozilla/sccache
@@ -453,7 +476,10 @@ step-electron-dist-build: &step-electron-dist-build
       if [ "$SKIP_DIST_ZIP" != "1" ]; then
         ninja -C out/Default electron:electron_dist_zip
         if [ "$CHECK_DIST_MANIFEST" == "1" ]; then
-          if [ "`uname`" == "Darwin" ]; then
+          if [ ! -z "$GCLIENT_TARGET_OS" ]; then
+            target_os=win
+            target_cpu=x64
+          elif [ "`uname`" == "Darwin" ]; then
             target_os=mac
             target_cpu=x64
             if [ x"$MAS_BUILD" == x"true" ]; then
@@ -1395,10 +1421,10 @@ commands:
             - *step-show-sccache-stats
 
             # mksnapshot
-            - *step-mksnapshot-build
-            - *step-mksnapshot-store
-            - *step-maybe-cross-arch-snapshot
-            - *step-maybe-cross-arch-snapshot-store
+            #- *step-mksnapshot-build
+            #- *step-mksnapshot-store
+            #- *step-maybe-cross-arch-snapshot
+            #- *step-maybe-cross-arch-snapshot-store
 
             # chromedriver
             - *step-electron-maybe-chromedriver-gn-gen
@@ -1634,6 +1660,19 @@ jobs:
       <<: *env-macos-build
       GCLIENT_EXTRA_ARGS: '--custom-var=checkout_mac=True --custom-var=host_os=mac'
     <<: *steps-checkout-and-save-cache
+
+  win-checkout-fast:
+    <<: *machine-linux-2xlarge
+    environment:
+      <<: *env-linux-2xlarge
+      <<: *env-testing-build
+      <<: *env-win-build
+    steps:
+      - electron-build:
+          persist: false
+          build: false
+          checkout: true
+          persist-checkout: true
 
   # Layer 2: Builds.
   linux-x64-testing:
@@ -2057,6 +2096,20 @@ jobs:
           attach: true
           checkout: false
 
+  win-x64-testing:
+    <<: *machine-linux-xlarge
+    environment:
+      <<: *env-global
+      <<: *env-testing-build
+      <<: *env-ninja-status
+      <<: *env-win-build
+      GCLIENT_EXTRA_ARGS: '--custom-var=checkout_win=True'
+    steps:
+      - electron-build:
+          persist: true
+          checkout: true
+          use-out-cache: false
+
   # Layer 3: Tests.
   linux-x64-unittests:
     <<: *machine-linux-2xlarge
@@ -2426,6 +2479,11 @@ workflows:
       - mas-testing-tests:
           requires:
             - mas-testing
+
+  build-win:
+    when: << pipeline.parameters.run-build-win >>
+    jobs:
+      - win-x64-testing
 
   nightly-linux-release-test:
     triggers:
