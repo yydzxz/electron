@@ -92,18 +92,14 @@ export function deregisterEvents (viewInstanceId: number) {
   ipcRendererInternal.removeAllListeners(`ELECTRON_GUEST_VIEW_INTERNAL_IPC_MESSAGE-${viewInstanceId}`);
 }
 
-export function createGuest (params: Record<string, any>): Promise<number> {
-  return ipcRendererInternal.invoke('ELECTRON_GUEST_VIEW_MANAGER_CREATE_GUEST', params);
-}
-
-export function attachGuest (
-  elementInstanceId: number, guestInstanceId: number, params: Record<string, any>, contentWindow: Window
-) {
+export function createGuest (
+  elementInstanceId: number, params: Record<string, any>, contentWindow: Window
+): Promise<number> {
   const embedderFrameId = (webFrame as ElectronInternal.WebFrameInternal).getWebFrameId(contentWindow);
   if (embedderFrameId < 0) { // this error should not happen.
     throw new Error('Invalid embedder frame');
   }
-  ipcRendererInternal.invoke('ELECTRON_GUEST_VIEW_MANAGER_ATTACH_GUEST', embedderFrameId, elementInstanceId, guestInstanceId, params);
+  return ipcRendererInternal.invoke('ELECTRON_GUEST_VIEW_MANAGER_CREATE_AND_ATTACH_GUEST', embedderFrameId, elementInstanceId, params);
 }
 
 export function detachGuest (guestInstanceId: number) {
@@ -113,6 +109,5 @@ export function detachGuest (guestInstanceId: number) {
 export const guestViewInternalModule = {
   deregisterEvents,
   createGuest,
-  attachGuest,
   detachGuest
 };
