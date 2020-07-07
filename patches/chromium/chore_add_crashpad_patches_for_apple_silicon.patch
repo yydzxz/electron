@@ -664,7 +664,7 @@ diff --git a/third_party/crashpad/crashpad/util/mac/mac_util_test.mm b/third_par
 index 546c6286964ee0e3a9c9ed7ecd443ebf9c7759e1..06bf47c3af9b3aba8c6485cf8c1f76b61e410db9 100644
 --- a/third_party/crashpad/crashpad/util/mac/mac_util_test.mm
 +++ b/third_party/crashpad/crashpad/util/mac/mac_util_test.mm
-@@ -135,7 +135,9 @@ void SwVers(NSString* argument, std::string* output) {
+@@ -135,7 +135,9 @@ TEST(MacUtil, MacModelAndBoard) {
    MacModelAndBoard(&model, &board);
  
    EXPECT_FALSE(model.empty());
@@ -912,7 +912,7 @@ diff --git a/third_party/crashpad/crashpad/util/net/http_transport_mac.mm b/thir
 index a433bb357da5865144ade7d3663b1c9b36199f8e..8faa1b8a0444f903bf588ba085d60882e9d61162 100644
 --- a/third_party/crashpad/crashpad/util/net/http_transport_mac.mm
 +++ b/third_party/crashpad/crashpad/util/net/http_transport_mac.mm
-@@ -91,6 +91,8 @@
+@@ -91,6 +91,8 @@ NSString* UserAgentString() {
      NSString* arch = @"i386";
  #elif defined(ARCH_CPU_X86_64)
      NSString* arch = @"x86_64";
