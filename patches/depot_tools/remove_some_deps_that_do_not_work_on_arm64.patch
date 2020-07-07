@@ -3,6 +3,7 @@ From: Samuel Attard <samuel@Samuels-Mac.local>
 Date: Mon, 6 Jul 2020 14:47:55 -0700
 Subject: remove some deps that do not work on arm64
 
+Once these deps have newly built arm64 versions we can remove this patch.
 
 diff --git a/gsutil.vpython b/gsutil.vpython
 index 8a2a38aac8e154199a1431a95b1d620052c8d770..0d9d92cd5f93c1f771253a4542c0548e7f002c10 100644
