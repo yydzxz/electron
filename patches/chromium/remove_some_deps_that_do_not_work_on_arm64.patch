@@ -1,8 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Samuel Attard <samuel@Samuels-Mac.local>
-Date: Thu, 2 Jul 2020 19:03:46 -0700
+From: Samuel Attard <marshallofsound@electronjs.org>
+Date: Mon, 6 Jul 2020 16:59:17 -0700
 Subject: remove some deps that do not work on arm64
 
+Once these deps have been fixed upstream we can remove this patch.
 
 diff --git a/.vpython b/.vpython
 index 0a28e76064296edea609eb52e57555689c23c0a3..edd43d286bdc14c165cbc90cbf7da64620c266e4 100644

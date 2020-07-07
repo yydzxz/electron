@@ -5,6 +5,278 @@ Subject: chore: add crashpad patches for apple silicon
 
 These will appear upstream shortly and when they do we can remove this patch.
 
+diff --git a/base/process/process_metrics_mac.cc b/base/process/process_metrics_mac.cc
+index 33b10d8563f0f9dc7bea1478664b075658378b2f..25b7579aec3953f57528acdd1ce738cc15bb1e26 100644
+--- a/base/process/process_metrics_mac.cc
++++ b/base/process/process_metrics_mac.cc
+@@ -28,7 +28,7 @@ namespace {
+ // This is a standin for the private pm_task_energy_data_t struct.
+ struct OpaquePMTaskEnergyData {
+   // Empirical size of the private struct.
+-  uint8_t data[384];
++  uint8_t data[408];
+ };
+ 
+ // Sample everything but network usage, since fetching network
+@@ -300,7 +300,6 @@ bool GetSystemMemoryInfo(SystemMemoryInfoKB* meminfo) {
+   }
+   DCHECK_EQ(HOST_VM_INFO64_COUNT, count);
+ 
+-  static_assert(PAGE_SIZE % 1024 == 0, "Invalid page size");
+   meminfo->free = saturated_cast<int>(
+       PAGE_SIZE / 1024 * (vm_info.free_count - vm_info.speculative_count));
+   meminfo->speculative =
+diff --git a/base/profiler/native_unwinder_mac.cc b/base/profiler/native_unwinder_mac.cc
+index 48232c5d0ce244d6e9a53e0d2229ec162e94c31a..d31c3d09700fd321fca0620785928075e5dfd50a 100644
+--- a/base/profiler/native_unwinder_mac.cc
++++ b/base/profiler/native_unwinder_mac.cc
+@@ -15,9 +15,11 @@
+ #include "base/profiler/native_unwinder.h"
+ #include "base/profiler/profile_builder.h"
+ 
++#if defined(ARCH_CPU_X86_64)
+ extern "C" {
+ void _sigtramp(int, int, struct sigset*);
+ }
++#endif
+ 
+ namespace base {
+ 
+@@ -103,6 +105,7 @@ const ModuleCache::Module* GetLibSystemKernelModule(ModuleCache* module_cache) {
+   return module;
+ }
+ 
++#if defined(ARCH_CPU_X86_64)
+ void GetSigtrampRange(uintptr_t* start, uintptr_t* end) {
+   auto address = reinterpret_cast<uintptr_t>(&_sigtramp);
+   DCHECK(address != 0);
+@@ -123,22 +126,33 @@ void GetSigtrampRange(uintptr_t* start, uintptr_t* end) {
+   DCHECK_EQ(info.start_ip, address);
+   *end = info.end_ip;
+ }
++#endif
+ 
+ }  // namespace
+ 
+ NativeUnwinderMac::NativeUnwinderMac(ModuleCache* module_cache)
+     : libsystem_kernel_module_(GetLibSystemKernelModule(module_cache)) {
++#if defined(ARCH_CPU_X86_64)
+   GetSigtrampRange(&sigtramp_start_, &sigtramp_end_);
++#endif
+ }
+ 
+ bool NativeUnwinderMac::CanUnwindFrom(const Frame& current_frame) const {
++#if defined(ARCH_CPU_ARM64)
++  return false;
++#else
+   return current_frame.module && current_frame.module->IsNative();
++#endif
+ }
+ 
+ UnwindResult NativeUnwinderMac::TryUnwind(RegisterContext* thread_context,
+                                           uintptr_t stack_top,
+                                           ModuleCache* module_cache,
+                                           std::vector<Frame>* stack) const {
++#if defined(ARCH_CPU_ARM64)
++  return UnwindResult::ABORTED;
++#endif
++
+   // We expect the frame correponding to the |thread_context| register state to
+   // exist within |stack|.
+   DCHECK_GT(stack->size(), 0u);
+@@ -187,11 +201,16 @@ UnwindResult NativeUnwinderMac::TryUnwind(RegisterContext* thread_context,
+       stack->emplace_back(rip, module_cache->GetModuleForAddress(rip));
+ 
+       // Save the relevant register state back into the thread context.
++#if defined(ARCH_CPU_ARM64)
++      RegisterContextSetInstructionPointer(thread_context, rip);
++      RegisterContextSetStackPointer(thread_context, rsp);
++#else
+       unw_word_t rbp;
+       unw_get_reg(&unwind_cursor, UNW_X86_64_RBP, &rbp);
+       thread_context->__rip = rip;
+       thread_context->__rsp = rsp;
+       thread_context->__rbp = rbp;
++#endif
+     }
+ 
+     if (result.has_value())
+@@ -233,6 +252,7 @@ Optional<UnwindResult> NativeUnwinderMac::CheckPreconditions(
+     return UnwindResult::UNRECOGNIZED_FRAME;
+   }
+ 
++#if defined(ARCH_CPU_X86_64)
+   // Don't continue if we're in sigtramp. Unwinding this from another thread
+   // is very fragile. It's a complex DWARF unwind that needs to restore the
+   // entire thread context which was saved by the kernel when the interrupt
+@@ -241,6 +261,7 @@ Optional<UnwindResult> NativeUnwinderMac::CheckPreconditions(
+       current_frame->instruction_pointer < sigtramp_end_) {
+     return UnwindResult::ABORTED;
+   }
++#endif
+ 
+   // Don't continue if rbp appears to be invalid (due to a previous bad
+   // unwind).
+diff --git a/base/profiler/native_unwinder_mac.h b/base/profiler/native_unwinder_mac.h
+index 1fcd76358dfd359203aac09c43755b8b195bce96..40c478b83c87355f8279ad60b1b7151c88973477 100644
+--- a/base/profiler/native_unwinder_mac.h
++++ b/base/profiler/native_unwinder_mac.h
+@@ -48,9 +48,11 @@ class NativeUnwinderMac : public Unwinder {
+   // Cached pointer to the libsystem_kernel module.
+   const ModuleCache::Module* const libsystem_kernel_module_;
+ 
++#if defined(ARCH_CPU_X86_64)
+   // The address range of |_sigtramp|, the signal trampoline function.
+   uintptr_t sigtramp_start_;
+   uintptr_t sigtramp_end_;
++#endif
+ };
+ 
+ }  // namespace base
+diff --git a/base/profiler/register_context.h b/base/profiler/register_context.h
+index 5e4a82bdc612325d11455d4f6c42fa83c2d6b25a..a27925a33fc3422426796f61e50eceed5ef0e3c8 100644
+--- a/base/profiler/register_context.h
++++ b/base/profiler/register_context.h
+@@ -93,20 +93,30 @@ inline uintptr_t& RegisterContextInstructionPointer(
+ 
+ #elif defined(ARCH_CPU_ARM64)
+ 
+-// TODO(thakis): Have getter/setter functions instead of returning a ref to
+-// prepare for arm64e. See __DARWIN_OPAQUE_ARM_THREAD_STATE6 in
+-// mach/arm/_structs.h
+-inline uintptr_t& RegisterContextStackPointer(arm_thread_state64_t* context) {
+-  return AsUintPtr(&context->__sp);
++inline uintptr_t RegisterContextStackPointer(arm_thread_state64_t* context) {
++  return arm_thread_state64_get_sp(*context);
+ }
+ 
+-inline uintptr_t& RegisterContextFramePointer(arm_thread_state64_t* context) {
+-  return AsUintPtr(&context->__fp);
++inline uintptr_t RegisterContextFramePointer(arm_thread_state64_t* context) {
++  return arm_thread_state64_get_fp(*context);
+ }
+ 
+-inline uintptr_t& RegisterContextInstructionPointer(
++inline uintptr_t RegisterContextInstructionPointer(
+     arm_thread_state64_t* context) {
+-  return AsUintPtr(&context->__pc);
++  return arm_thread_state64_get_pc(*context);
++}
++
++inline void RegisterContextSetStackPointer(arm_thread_state64_t* context, uintptr_t sp) {
++  arm_thread_state64_set_sp(*context, sp);
++}
++
++inline void RegisterContextSetFramePointer(arm_thread_state64_t* context, uintptr_t fp) {
++  arm_thread_state64_set_fp(*context, fp);
++}
++
++inline void RegisterContextSetInstructionPointer(
++    arm_thread_state64_t* context, uintptr_t ip) {
++  arm_thread_state64_set_pc_fptr(*context, reinterpret_cast<void*>(ip));
+ }
+ #endif
+ 
+diff --git a/base/profiler/stack_sampler_impl_unittest.cc b/base/profiler/stack_sampler_impl_unittest.cc
+index 48b12c299ec8cbbba6b98b4f9f0605d5a97cd16e..e0111fb4454c5a4c8c5546ccc93c26f905ada9fa 100644
+--- a/base/profiler/stack_sampler_impl_unittest.cc
++++ b/base/profiler/stack_sampler_impl_unittest.cc
+@@ -22,6 +22,9 @@
+ #include "testing/gmock/include/gmock/gmock.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
++// FIXME: Reenable for arm64.
++#if !defined(ARCH_CPU_ARM64)
++
+ namespace base {
+ 
+ namespace {
+@@ -501,3 +504,5 @@ TEST(StackSamplerImplTest, WalkStack_NativeThenAux) {
+ }
+ 
+ }  // namespace base
++
++#endif
+diff --git a/base/profiler/suspendable_thread_delegate_mac.cc b/base/profiler/suspendable_thread_delegate_mac.cc
+index a31a0caf2b15cca0ebff7e19e5906d119f319f66..f1e006a4e6ac458cab32837412958c6dd8d113ee 100644
+--- a/base/profiler/suspendable_thread_delegate_mac.cc
++++ b/base/profiler/suspendable_thread_delegate_mac.cc
+@@ -24,11 +24,18 @@ namespace base {
+ namespace {
+ 
+ // Fills |state| with |target_thread|'s context. NO HEAP ALLOCATIONS.
+-bool GetThreadState(thread_act_t target_thread, x86_thread_state64_t* state) {
++bool GetThreadState(thread_act_t target_thread, RegisterContext* state) {
++#if defined(ARCH_CPU_X86_64)
+   auto count = static_cast<mach_msg_type_number_t>(x86_THREAD_STATE64_COUNT);
+   return thread_get_state(target_thread, x86_THREAD_STATE64,
+                           reinterpret_cast<thread_state_t>(state),
+                           &count) == KERN_SUCCESS;
++#elif defined(ARCH_CPU_ARM64)
++  auto count = static_cast<mach_msg_type_number_t>(ARM_THREAD_STATE64_COUNT);
++  return thread_get_state(target_thread, ARM_THREAD_STATE64,
++                          reinterpret_cast<thread_state_t>(state),
++                          &count) == KERN_SUCCESS;
++#endif
+ }
+ 
+ }  // namespace
+@@ -68,7 +75,7 @@ SuspendableThreadDelegateMac::SuspendableThreadDelegateMac(
+   // Therefore, for all the system functions that might be linked in dynamically
+   // that are used while threads are suspended, make calls to them to make sure
+   // that they are linked up.
+-  x86_thread_state64_t thread_state;
++  RegisterContext thread_state;
+   GetThreadState(thread_port_, &thread_state);
+ }
+ 
+@@ -85,7 +92,7 @@ PlatformThreadId SuspendableThreadDelegateMac::GetThreadId() const {
+ 
+ // NO HEAP ALLOCATIONS.
+ bool SuspendableThreadDelegateMac::GetThreadContext(
+-    x86_thread_state64_t* thread_context) {
++    RegisterContext* thread_context) {
+   return GetThreadState(thread_port_, thread_context);
+ }
+ 
+@@ -100,12 +107,17 @@ bool SuspendableThreadDelegateMac::CanCopyStack(uintptr_t stack_pointer) {
+ }
+ 
+ std::vector<uintptr_t*> SuspendableThreadDelegateMac::GetRegistersToRewrite(
+-    x86_thread_state64_t* thread_context) {
++    RegisterContext* thread_context) {
++#if defined(ARCH_CPU_X86_64)
+   return {
+       &AsUintPtr(&thread_context->__rbx), &AsUintPtr(&thread_context->__rbp),
+       &AsUintPtr(&thread_context->__rsp), &AsUintPtr(&thread_context->__r12),
+       &AsUintPtr(&thread_context->__r13), &AsUintPtr(&thread_context->__r14),
+       &AsUintPtr(&thread_context->__r15)};
++#elif defined(ARCH_CPU_ARM64)
++  // FIXME: Should return x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, fp, and lr.
++  return { };
++#endif
+ }
+ 
+ }  // namespace base
+diff --git a/base/profiler/suspendable_thread_delegate_mac.h b/base/profiler/suspendable_thread_delegate_mac.h
+index f6eee8fe1434acf09b856a152bdb7b5bb4454030..1898b377a9c8ce1085c0381d34c74812d23ed3b3 100644
+--- a/base/profiler/suspendable_thread_delegate_mac.h
++++ b/base/profiler/suspendable_thread_delegate_mac.h
+@@ -46,12 +46,12 @@ class BASE_EXPORT SuspendableThreadDelegateMac
+   // SuspendableThreadDelegate
+   std::unique_ptr<SuspendableThreadDelegate::ScopedSuspendThread>
+   CreateScopedSuspendThread() override;
+-  bool GetThreadContext(x86_thread_state64_t* thread_context) override;
++  bool GetThreadContext(RegisterContext* thread_context) override;
+   PlatformThreadId GetThreadId() const override;
+   uintptr_t GetStackBaseAddress() const override;
+   bool CanCopyStack(uintptr_t stack_pointer) override;
+   std::vector<uintptr_t*> GetRegistersToRewrite(
+-      x86_thread_state64_t* thread_context) override;
++      RegisterContext* thread_context) override;
+ 
+  private:
+   // Weak reference: Mach port for thread being profiled.
 diff --git a/third_party/crashpad/crashpad/client/simulate_crash_mac.cc b/third_party/crashpad/crashpad/client/simulate_crash_mac.cc
 index 8d6e8bd9286f50db96d45c39e3359acc446dc94b..87ba479ec3c0610735efe221f77e60a1a344ad6f 100644
 --- a/third_party/crashpad/crashpad/client/simulate_crash_mac.cc
@@ -63,122 +335,6 @@ index c2f4c20496ab59036f2e9c323506a8367cd1b0c0..8e9c5d42913f97a9aad5bdd24098c68b
  #else
  #error Port to your CPU architecture
  #endif
-diff --git a/third_party/crashpad/crashpad/snapshot/mac/cpu_context_mac.cc b/third_party/crashpad/crashpad/snapshot/mac/cpu_context_mac.cc
-index 6e2950a506ccb375cf052898119a10cb93170448..61604c5fe628e48e4a23bf3ea72fdcfae3d52241 100644
---- a/third_party/crashpad/crashpad/snapshot/mac/cpu_context_mac.cc
-+++ b/third_party/crashpad/crashpad/snapshot/mac/cpu_context_mac.cc
-@@ -569,4 +569,111 @@ void InitializeCPUContextARM64(CPUContextARM64* context,
- 
- #endif
- 
-+#if defined(ARCH_CPU_ARM64)
-+
-+namespace {
-+
-+void InitializeCPUContextARM64Thread(
-+    CPUContextARM64* context, const arm_thread_state64_t* arm_thread_state64) {
-+  memcpy(&context->regs, arm_thread_state64->__x, sizeof(arm_thread_state64->__x));
-+  context->regs[29] = arm_thread_state64_get_fp(*arm_thread_state64);
-+  context->regs[30] = arm_thread_state64_get_lr(*arm_thread_state64);
-+  context->sp = arm_thread_state64_get_sp(*arm_thread_state64);
-+  context->pc = arm_thread_state64_get_pc(*arm_thread_state64);
-+  context->spsr = arm_thread_state64->__cpsr;
-+}
-+
-+void InitializeCPUContextARM64Neon(
-+    CPUContextARM64* context, const arm_neon_state64_t* arm_neon_state64) {
-+  memcpy(&context->fpsimd,
-+         arm_neon_state64->__v,
-+         sizeof(context->fpsimd));
-+  context->fpsr = arm_neon_state64->__fpsr;
-+  context->fpcr = arm_neon_state64->__fpcr;
-+}
-+
-+thread_state_flavor_t InitializeCPUContextARM64Flavor(
-+    CPUContextARM64* context,
-+    thread_state_flavor_t flavor,
-+    ConstThreadState state,
-+    mach_msg_type_number_t state_count) {
-+  mach_msg_type_number_t expected_state_count;
-+  switch (flavor) {
-+    case ARM_THREAD_STATE64:
-+      expected_state_count = ARM_THREAD_STATE64_COUNT;
-+      break;
-+    case ARM_NEON_STATE64:
-+      expected_state_count = ARM_NEON_STATE64_COUNT;
-+      break;
-+    case THREAD_STATE_NONE:
-+      expected_state_count = 0;
-+      break;
-+    default:
-+      LOG(WARNING) << "unhandled flavor " << flavor;
-+      return THREAD_STATE_NONE;
-+  }
-+
-+  if (state_count < expected_state_count) {
-+    LOG(WARNING) << "expected state_count " << expected_state_count
-+                 << " for flavor " << flavor << ", observed " << state_count;
-+    return THREAD_STATE_NONE;
-+  }
-+
-+  switch (flavor) {
-+    case ARM_THREAD_STATE64: {
-+      const arm_thread_state64_t* arm_thread_state64 =
-+          reinterpret_cast<const arm_thread_state64_t*>(state);
-+      InitializeCPUContextARM64Thread(context, arm_thread_state64);
-+      return flavor;
-+    }
-+
-+    case ARM_NEON_STATE64: {
-+      const arm_neon_state64_t* arm_neon_state64 =
-+          reinterpret_cast<const arm_neon_state64_t*>(state);
-+      InitializeCPUContextARM64Neon(context, arm_neon_state64);
-+      return flavor;
-+    }
-+
-+    case THREAD_STATE_NONE: {
-+      // This may happen without error when called without exception-style
-+      // flavor data, or even from an exception handler when the exception
-+      // behavior is EXCEPTION_DEFAULT.
-+      return flavor;
-+    }
-+
-+    default: {
-+      NOTREACHED();
-+      return THREAD_STATE_NONE;
-+    }
-+  }
-+}
-+
-+}  // namespace
-+
-+namespace internal {
-+
-+void InitializeCPUContextARM64(CPUContextARM64* context,
-+                               thread_state_flavor_t flavor,
-+                               ConstThreadState state,
-+                               mach_msg_type_number_t state_count,
-+                               const arm_thread_state64_t* arm_thread_state64,
-+                               const arm_neon_state64_t* arm_neon_state64) {
-+  thread_state_flavor_t set_flavor = THREAD_STATE_NONE;
-+  if (flavor != THREAD_STATE_NONE) {
-+    set_flavor =
-+        InitializeCPUContextARM64Flavor(context, flavor, state, state_count);
-+  }
-+
-+  if (set_flavor != ARM_THREAD_STATE64) {
-+    InitializeCPUContextARM64Thread(context, arm_thread_state64);
-+  }
-+  if (set_flavor != ARM_NEON_STATE64) {
-+    InitializeCPUContextARM64Neon(context, arm_neon_state64);
-+  }
-+}
-+
-+}  // namespace internal
-+
-+#endif
-+
- }  // namespace crashpad
 diff --git a/third_party/crashpad/crashpad/snapshot/mac/cpu_context_mac.h b/third_party/crashpad/crashpad/snapshot/mac/cpu_context_mac.h
 index 05c035a1d0d8c241bfc065f4da640dd0dd8e775e..9b7b6a16e92888ab6fcd5f793745a195ecdb1651 100644
 --- a/third_party/crashpad/crashpad/snapshot/mac/cpu_context_mac.h
@@ -361,7 +517,7 @@ index 2d64ff10a8c7d3d14784be643daa6852888bb5ef..49fa4785cfbef820209c131835fd9456
    return true;
  #else
 diff --git a/third_party/crashpad/crashpad/snapshot/mac/system_snapshot_mac.cc b/third_party/crashpad/crashpad/snapshot/mac/system_snapshot_mac.cc
-index 5410be085ea81fc284c1364ba14499a2caf5d918..b8b4ea9da18b3dfed7dc5141df09317d99096995 100644
+index 5410be085ea81fc284c1364ba14499a2caf5d918..3f06ec43ed5556be0efaa816cf75bc1c6f7d1b03 100644
 --- a/third_party/crashpad/crashpad/snapshot/mac/system_snapshot_mac.cc
 +++ b/third_party/crashpad/crashpad/snapshot/mac/system_snapshot_mac.cc
 @@ -157,6 +157,8 @@ CPUArchitecture SystemSnapshotMac::GetCPUArchitecture() const {
@@ -392,6 +548,51 @@ index 5410be085ea81fc284c1364ba14499a2caf5d918..b8b4ea9da18b3dfed7dc5141df09317d
    return ReadStringSysctlByName("machdep.cpu.vendor");
  #else
  #error port to your architecture
+@@ -207,7 +212,7 @@ uint32_t SystemSnapshotMac::CPUX86Signature() const {
+ #if defined(ARCH_CPU_X86_FAMILY)
+   return ReadIntSysctlByName<uint32_t>("machdep.cpu.signature", 0);
+ #else
+-  NOTREACHED();
++  DCHECK(false);
+   return 0;
+ #endif
+ }
+@@ -218,7 +223,7 @@ uint64_t SystemSnapshotMac::CPUX86Features() const {
+ #if defined(ARCH_CPU_X86_FAMILY)
+   return ReadIntSysctlByName<uint64_t>("machdep.cpu.feature_bits", 0);
+ #else
+-  NOTREACHED();
++  DCHECK(false);
+   return 0;
+ #endif
+ }
+@@ -229,7 +234,7 @@ uint64_t SystemSnapshotMac::CPUX86ExtendedFeatures() const {
+ #if defined(ARCH_CPU_X86_FAMILY)
+   return ReadIntSysctlByName<uint64_t>("machdep.cpu.extfeature_bits", 0);
+ #else
+-  NOTREACHED();
++  DCHECK(false);
+   return 0;
+ #endif
+ }
+@@ -254,7 +259,7 @@ uint32_t SystemSnapshotMac::CPUX86Leaf7Features() const {
+   CallCPUID(7, &eax, &ebx, &ecx, &edx);
+   return ebx;
+ #else
+-  NOTREACHED();
++  DCHECK(false);
+   return 0;
+ #endif
+ }
+@@ -293,7 +298,7 @@ bool SystemSnapshotMac::CPUX86SupportsDAZ() const {
+   // Test the DAZ bit.
+   return fxsave.mxcsr_mask & (1 << 6);
+ #else
+-  NOTREACHED();
++  DCHECK(false);
+   return false;
+ #endif
+ }
 diff --git a/third_party/crashpad/crashpad/snapshot/mac/system_snapshot_mac_test.cc b/third_party/crashpad/crashpad/snapshot/mac/system_snapshot_mac_test.cc
 index 2b665924d5ea08fe2714de06f3b766d731bc39e8..2c1a322bc08b522d9a3cf95bcf2510806484d767 100644
 --- a/third_party/crashpad/crashpad/snapshot/mac/system_snapshot_mac_test.cc
