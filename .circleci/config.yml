@@ -84,6 +84,11 @@ machine-mac-large: &machine-mac-large
   macos:
     xcode: "11.5.0"
 
+machine-mac-large-arm: &machine-mac-large-arm
+  resource_class: large
+  macos:
+    xcode: "12.0.0-UA"
+
 # Build configurations options.
 env-testing-build: &env-testing-build
   GN_CONFIG: //electron/build/args/testing.gn
@@ -1990,7 +1995,7 @@ jobs:
           checkout: false
 
   osx-testing-arm64:
-    <<: *machine-mac-large
+    <<: *machine-mac-large-arm
     environment:
       <<: *env-mac-large
       <<: *env-testing-build
