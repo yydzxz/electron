@@ -744,7 +744,7 @@ step-maybe-cross-arch-snapshot: &step-maybe-cross-arch-snapshot
   run:
     name: Generate cross arch snapshot (arm/arm64)
     command: |
-      if [ "$TRIGGER_ARM_TEST" == "true" ] && [ -z "$CIRCLE_PR_NUMBER" ]; then
+      if [ "$TRIGGER_ARM_TEST" == "true" ] && [ -z "$CIRCLE_PR_NUMBER" ] && [ "`uname`" == "Linux" ]; then
         cd src
         if [ "$TARGET_ARCH" == "arm" ]; then
           export MKSNAPSHOT_PATH="clang_x86_v8_arm"
