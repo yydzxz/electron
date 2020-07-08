@@ -6,7 +6,7 @@ const request = require('request');
 const BUILD_APPVEYOR_URL = 'https://ci.appveyor.com/api/builds';
 const CIRCLECI_PIPELINE_URL = 'https://circleci.com/api/v2/project/gh/electron/electron/pipeline';
 const VSTS_URL = 'https://github.visualstudio.com/electron/_apis/build';
-const DEVOPS_URL = 'https://dev.azure.com/electron-ci/_apis/build';
+const DEVOPS_URL = 'https://dev.azure.com/electron-ci/electron/_apis/build';
 const CIRCLECI_WAIT_TIME = process.env.CIRCLECI_WAIT_TIME || 30000;
 
 const appVeyorJobs = {
@@ -279,11 +279,12 @@ async function buildVSTS (targetBranch, options) {
       'Content-Type': 'application/json'
     }
   };
+  jobRequestedCount++;
   const vstsResponse = await makeRequest(requestOpts, true).catch(err => {
     console.log('Error calling VSTS to get build definitions:', err);
   });
-  const buildsToRun = vstsResponse.value.filter(build => build.name === options.job);
-  buildsToRun.forEach((build) => callVSTSBuild(build, targetBranch, environmentVariables));
+  const buildToRun = vstsResponse.value.find(build => build.name === options.job);
+  callVSTSBuild(buildToRun, targetBranch, environmentVariables, vstsURL, vstsToken);
 }
 
 async function callVSTSBuild (build, targetBranch, environmentVariables, vstsURL, vstsToken) {
@@ -307,7 +308,6 @@ async function callVSTSBuild (build, targetBranch, environmentVariables, vstsURL
     body: JSON.stringify(buildBody),
     method: 'POST'
   };
-  jobRequestedCount++;
   const vstsResponse = await makeRequest(requestOpts, true).catch(err => {
     console.log(`Error calling VSTS for job ${build.name}`, err);
   });
