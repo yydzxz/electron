@@ -82,8 +82,10 @@ void PrintPreviewMessageHandler::OnMetafileReadyForPrinting(
   // Always try to stop the worker.
   StopWorker(params.document_cookie);
 
-  if (params.expected_pages_count == 0)
+  if (params.expected_pages_count == 0) {
+    RejectPromise(ids.request_id);
     return;
+  }
 
   const base::ReadOnlySharedMemoryRegion& metafile =
       params.content.metafile_data_region;
