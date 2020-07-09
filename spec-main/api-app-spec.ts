@@ -1439,6 +1439,10 @@ describe('app module', () => {
 
   ifdescribe(process.platform === 'darwin')('app.setSecureKeyboardEntryEnabled', () => {
     it('changes Secure Keyboard Entry is enabled', () => {
+      if (app.isSecureKeyboardEntryEnabled()) {
+        console.log('isSecureKeyboardEntryEnabled is set to true, so set it to false before testing');
+        app.setSecureKeyboardEntryEnabled(false);
+      }
       app.setSecureKeyboardEntryEnabled(true);
       expect(app.isSecureKeyboardEntryEnabled()).to.equal(true);
       app.setSecureKeyboardEntryEnabled(false);
