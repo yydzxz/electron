@@ -96,6 +96,7 @@
 #include "shell/common/mouse_util.h"
 #include "shell/common/node_includes.h"
 #include "shell/common/options_switches.h"
+#include "shell/common/process_util.h"
 #include "shell/common/v8_value_serializer.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
@@ -1312,9 +1313,15 @@ void WebContents::DidFinishNavigation(
          frame_process_id, frame_routing_id);
 
     // Do not emit "did-fail-load" for canceled requests.
-    if (code != net::ERR_ABORTED)
+    if (code != net::ERR_ABORTED) {
+      EmitWarning(
+          node::Environment::GetCurrent(JavascriptEnvironment::GetIsolate()),
+          "Failed to load URL: " + url.possibly_invalid_spec() +
+              " with error: " + description,
+          "electron");
       Emit("did-fail-load", code, description, url, is_main_frame,
            frame_process_id, frame_routing_id);
+    }
   }
 }
 
