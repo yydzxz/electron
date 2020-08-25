@@ -27,6 +27,13 @@ void InitializeFeatureList() {
   // Can be reenabled when our site instance policy is aligned with chromium
   // when node integration is enabled.
   disable_features +=
+#if defined(MAS_BUILD)
+      // This setting adds a feature for respecting the MacOS LCD text behavior,
+      // but uses CGFontRenderingGetFontSmoothingDisabled() to do so, which
+      // is a private macOS API and will cause macOS App Store rejections.
+      // See https://chromium-review.googlesource.com/c/chromium/src/+/2207413
+      std::string(",") + net::features::kRespectMacLCDTextSetting +
+#endif
       std::string(",") + features::kSpareRendererForSitePerProcess.name +
       // Disable SameSite-by-default, this will be a breaking change for many
       // apps which cannot land in master until 11-x-y is branched out. For more
